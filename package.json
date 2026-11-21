@@ -1,0 +1,14 @@
+{
+  "name": "orca-speak-reply",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "orca plugin test .",
+    "validate": "orca plugin validate ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "5"
+  }
+}
