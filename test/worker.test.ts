@@ -4,16 +4,21 @@ import { createActivate, type Speech } from '../src/worker.ts'
 
 function fakeSpeaker() {
   const spoken: string[] = []
+  const calls: string[] = []
   let finish = () => {}
-  let stops = 0
   const speak = (text: string): Speech => {
     spoken.push(text)
     const done = new Promise<void>((resolve) => {
       finish = resolve
     })
-    return { stop: () => (stops++, finish()), done }
+    return {
+      pause: () => calls.push('pause'),
+      resume: () => calls.push('resume'),
+      stop: () => (calls.push('stop'), finish()),
+      done,
+    }
   }
-  return { speak, spoken, finish: () => finish(), stops: () => stops }
+  return { speak, spoken, calls, finish: () => finish() }
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -33,27 +38,62 @@ async function mount(context: unknown) {
   return { worker, speaker }
 }
 
-const statusTexts = (worker: Awaited<ReturnType<typeof mount>>['worker']) =>
-  worker.host.callsOf('statusBar.update').map((params) => (params as { text: string }).text)
+type Worker = Awaited<ReturnType<typeof mount>>['worker']
+type StatusUpdate = { id: string; text?: string; visible?: boolean }
 
-test('speaks the focused workspace reply and shows Stop until it ends', async () => {
-  const { worker, speaker } = await mount({ workspaceId: 'identity:w', branch: 'b', displayName: 'b', terminals: [] })
-  await worker.command('speak-reply.toggle')
-  assert.deepEqual(speaker.spoken, ['Done.'])
-  assert.deepEqual(statusTexts(worker), ['Stop'])
-  speaker.finish()
+const updates = (worker: Worker) => worker.host.callsOf('statusBar.update') as StatusUpdate[]
+const mainLabels = (worker: Worker) => updates(worker).flatMap((u) => (u.id === 'speak' ? [u.text] : []))
+const isStopShown = (worker: Worker) => updates(worker).filter((u) => u.id === 'stop').at(-1)?.visible
+
+const focused = { workspaceId: 'identity:w', branch: 'b', displayName: 'b', terminals: [] }
+
+test('hides Stop and shows Read reply when nothing is playing', async () => {
+  const { worker } = await mount(focused)
   await tick()
-  assert.deepEqual(statusTexts(worker), ['Stop', 'Read reply'])
+  assert.deepEqual(mainLabels(worker), ['Read reply'])
+  assert.equal(isStopShown(worker), false)
 })
 
-test('a second press stops the speech instead of starting another', async () => {
-  const { worker, speaker } = await mount({ workspaceId: 'identity:w', branch: 'b', displayName: 'b', terminals: [] })
+test('speaks the focused workspace reply and shows Pause and Stop until it ends', async () => {
+  const { worker, speaker } = await mount(focused)
   await worker.command('speak-reply.toggle')
-  await worker.command('speak-reply.toggle')
+  assert.deepEqual(speaker.spoken, ['Done.'])
+  assert.deepEqual(mainLabels(worker), ['Read reply', 'Pause'])
+  assert.equal(isStopShown(worker), true)
+  speaker.finish()
   await tick()
-  assert.equal(speaker.stops(), 1)
+  assert.deepEqual(mainLabels(worker), ['Read reply', 'Pause', 'Read reply'])
+  assert.equal(isStopShown(worker), false)
+})
+
+test('pressing again pauses, and pressing once more resumes the same speech', async () => {
+  const { worker, speaker } = await mount(focused)
+  await worker.command('speak-reply.toggle')
+  await worker.command('speak-reply.toggle')
+  await worker.command('speak-reply.toggle')
+  assert.deepEqual(speaker.calls, ['pause', 'resume'])
   assert.equal(speaker.spoken.length, 1)
-  assert.deepEqual(statusTexts(worker), ['Stop', 'Read reply'])
+  assert.deepEqual(mainLabels(worker), ['Read reply', 'Pause', 'Resume', 'Pause'])
+  assert.equal(isStopShown(worker), true)
+})
+
+test('Stop ends a paused speech so the next press reads from the start', async () => {
+  const { worker, speaker } = await mount(focused)
+  await worker.command('speak-reply.toggle')
+  await worker.command('speak-reply.toggle')
+  await worker.command('speak-reply.stop')
+  await tick()
+  assert.deepEqual(speaker.calls, ['pause', 'stop'])
+  assert.equal(mainLabels(worker).at(-1), 'Read reply')
+  assert.equal(isStopShown(worker), false)
+  await worker.command('speak-reply.toggle')
+  assert.equal(speaker.spoken.length, 2)
+})
+
+test('Stop does nothing when nothing is playing', async () => {
+  const { worker, speaker } = await mount(focused)
+  await worker.command('speak-reply.stop')
+  assert.deepEqual(speaker.calls, [])
 })
 
 test('says no workspace is focused when Orca has none', async () => {

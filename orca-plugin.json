@@ -4,7 +4,7 @@
   "execution": "trusted-worker",
   "id": "speak-reply",
   "name": "Speak Reply",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A status bar button that reads the focused workspace's last agent reply aloud, in chat tabs and terminals. macOS only.",
   "author": { "name": "Fullchee Zhang", "url": "https://github.com/Fullchee" },
   "repository": "https://github.com/Fullchee/orca-speak-reply",
@@ -13,7 +13,10 @@
   "main": "src/worker.ts",
   "capabilities": [{ "kind": "workspace:read" }],
   "contributes": {
-    "commands": [{ "id": "speak-reply.toggle", "title": "Read last reply aloud" }],
+    "commands": [
+      { "id": "speak-reply.toggle", "title": "Read last reply aloud, or pause and resume it" },
+      { "id": "speak-reply.stop", "title": "Stop reading the reply" }
+    ],
     "keybindings": [{ "command": "speak-reply.toggle", "key": "Mod+Shift+R" }],
     "statusBarItems": [
       {
@@ -22,6 +25,13 @@
         "icon": "play",
         "tooltip": "Read the last agent reply in this workspace aloud",
         "command": "speak-reply.toggle"
+      },
+      {
+        "id": "stop",
+        "text": "Stop",
+        "icon": "stop",
+        "tooltip": "Stop reading and start from the top next time",
+        "command": "speak-reply.stop"
       }
     ]
   }
