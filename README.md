@@ -13,13 +13,19 @@ It reads the newest reply of the agent that answered most recently in the focuse
 
 ## Install
 
-```sh
-orca plugin install Fullchee/orca-speak-reply
-```
+You need macOS and Orca with plugins turned on (Settings → Plugins). No clone is needed: Orca installs straight from GitHub.
 
-From a clone, `bun run plugin:install` runs the same command. Run it again to update to the newest release.
+1. Install the newest release:
 
-Orca lists the access the plugin needs and prints the `--approve <fingerprint>` command to run next.
+   ```sh
+   orca plugin install Fullchee/orca-speak-reply
+   ```
+
+2. Orca stops and lists the access the plugin asks for (see [Access](#access)). If you agree, run the `--approve <fingerprint>` command it prints.
+3. Check that **Read reply** appears in the status bar, or that `orca plugin list` shows `fullchee.speak-reply` as `running`.
+
+- **Update**: `orca plugin update fullchee.speak-reply`
+- **Remove**: `orca plugin uninstall fullchee.speak-reply`
 
 ## Access
 
@@ -36,6 +42,7 @@ orca plugin types .        # writes .orca/types, which tsconfig.json extends
 orca plugin dev watch .    # load into Orca, reload on save, stream logs
 bun run typecheck
 bun run test
+bun run plugin:install     # install the newest GitHub release into Orca
 ```
 
 ## License
