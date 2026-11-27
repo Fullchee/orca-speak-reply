@@ -10,6 +10,60 @@ const WORDS_PER_MINUTE = '210'
 
 type Playback = { speech: Speech; isPaused: boolean }
 
+/** One sentence being spoken: `cancel` cuts it off, `ended` settles when it ends either way. */
+export type Utterance = { cancel(): void; ended: Promise<void> }
+
+export function sentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => /\w/.test(sentence))
+}
+
+/**
+ * `say` hands audio to a macOS speech service that keeps talking when `say` is frozen,
+ * so pausing cancels the current sentence and resuming speaks it again from its start.
+ */
+export function speakBySentence(text: string, utter: (sentence: string) => Utterance): Speech {
+  const parts = sentences(text)
+  let index = 0
+  let current: Utterance | null = null
+  let finish = () => {}
+  const done = new Promise<void>((resolve) => {
+    finish = resolve
+  })
+
+  const playNext = () => {
+    if (index >= parts.length) return finish()
+    const utterance = utter(parts[index])
+    current = utterance
+    void utterance.ended.then(() => {
+      if (current !== utterance) return
+      index++
+      playNext()
+    })
+  }
+  const cancel = () => {
+    const utterance = current
+    current = null
+    utterance?.cancel()
+  }
+
+  playNext()
+  return {
+    pause: cancel,
+    resume: () => {
+      if (!current) playNext()
+    },
+    stop: () => {
+      cancel()
+      index = parts.length
+      finish()
+    },
+    done,
+  }
+}
+
 export function createActivate({ runOrca, speak }: Deps): Activate {
   return (orca) => {
     let playback: Playback | null = null
@@ -62,15 +116,12 @@ export default createActivate({
         stdout ? resolve(stdout) : reject(error),
       ),
     ),
-  speak: (text) => {
-    const child = spawn('/usr/bin/say', ['-r', WORDS_PER_MINUTE, text], { stdio: 'ignore' })
-    return {
-      // Freezing `say` holds its place in the text, so SIGCONT picks up mid-sentence.
-      pause: () => child.kill('SIGSTOP'),
-      resume: () => child.kill('SIGCONT'),
-      // A stopped process ignores SIGTERM until it runs again.
-      stop: () => (child.kill('SIGCONT'), child.kill()),
-      done: new Promise((resolve) => child.on('close', () => resolve())),
-    }
-  },
+  speak: (text) =>
+    speakBySentence(text, (sentence) => {
+      const child = spawn('/usr/bin/say', ['-r', WORDS_PER_MINUTE, sentence], { stdio: 'ignore' })
+      return {
+        cancel: () => child.kill(),
+        ended: new Promise((resolve) => child.on('close', () => resolve())),
+      }
+    }),
 })

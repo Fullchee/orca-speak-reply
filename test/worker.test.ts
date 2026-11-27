@@ -1,6 +1,6 @@
 import { assert, mockHost, mountWorker, test } from 'orca/testing'
 import { NO_WORKSPACE } from '../src/reply.ts'
-import { createActivate, type Speech } from '../src/worker.ts'
+import { createActivate, sentences, speakBySentence, type Speech, type Utterance } from '../src/worker.ts'
 
 function fakeSpeaker() {
   const spoken: string[] = []
@@ -100,4 +100,68 @@ test('says no workspace is focused when Orca has none', async () => {
   const { worker, speaker } = await mount(null)
   await worker.command('speak-reply.toggle')
   assert.deepEqual(speaker.spoken, [NO_WORKSPACE])
+})
+
+function fakeUtterances() {
+  const said: string[] = []
+  const cancelled: string[] = []
+  let end = () => {}
+  const utter = (sentence: string): Utterance => {
+    said.push(sentence)
+    const ended = new Promise<void>((resolve) => {
+      end = resolve
+    })
+    return { cancel: () => (cancelled.push(sentence), end()), ended }
+  }
+  return { utter, said, cancelled, end: () => end() }
+}
+
+test('splits text into sentences and lines, skipping blank ones', () => {
+  assert.deepEqual(sentences('One. Two? Three!\n- four\n\n  \nFive'), ['One.', 'Two?', 'Three!', '- four', 'Five'])
+})
+
+test('speaks each sentence in turn, then finishes', async () => {
+  const fake = fakeUtterances()
+  let isDone = false
+  void speakBySentence('One. Two.', fake.utter).done.then(() => (isDone = true))
+  fake.end()
+  await tick()
+  fake.end()
+  await tick()
+  assert.deepEqual(fake.said, ['One.', 'Two.'])
+  assert.equal(isDone, true)
+})
+
+test('pausing cancels the current sentence and resuming speaks it again', async () => {
+  const fake = fakeUtterances()
+  const speech = speakBySentence('One. Two.', fake.utter)
+  fake.end()
+  await tick()
+  speech.pause()
+  await tick()
+  speech.resume()
+  speech.resume()
+  assert.deepEqual(fake.cancelled, ['Two.'])
+  assert.deepEqual(fake.said, ['One.', 'Two.', 'Two.'])
+})
+
+test('stopping cancels the sentence and finishes without speaking more', async () => {
+  const fake = fakeUtterances()
+  const speech = speakBySentence('One. Two.', fake.utter)
+  let isDone = false
+  void speech.done.then(() => (isDone = true))
+  speech.stop()
+  await tick()
+  speech.resume()
+  assert.deepEqual(fake.said, ['One.'])
+  assert.equal(isDone, true)
+})
+
+test('finishes at once when there is nothing to say', async () => {
+  const fake = fakeUtterances()
+  let isDone = false
+  void speakBySentence('  ', fake.utter).done.then(() => (isDone = true))
+  await tick()
+  assert.equal(isDone, true)
+  assert.deepEqual(fake.said, [])
 })

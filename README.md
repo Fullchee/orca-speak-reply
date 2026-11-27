@@ -5,7 +5,7 @@ An [Orca](https://orca.dev) plugin that reads the last agent reply in the focuse
 ## Use
 
 - **Read**: click **Read reply** in the status bar, or press ⌘⇧R.
-- **Pause / Resume**: click the same button, or press ⌘⇧R again. Resume continues where it paused.
+- **Pause / Resume**: click the same button, or press ⌘⇧R again. Resume replays the sentence it paused in, then carries on.
 - **Stop**: click **Stop**, shown while a reply plays or is paused. The next read starts from the top.
 
 It reads the newest reply of the agent that answered most recently in the focused workspace. Markdown is reduced to plain sentences: code blocks become "code block" and URLs become "link".
@@ -20,7 +20,7 @@ Orca lists the access the plugin needs and prints the `--approve <fingerprint>` 
 
 ## Access
 
-- **Full access (`trusted-worker`)**: the worker runs the `orca` CLI to read the reply, and `say` to speak it. Pausing freezes the `say` process.
+- **Full access (`trusted-worker`)**: the worker runs the `orca` CLI to read the reply, and `say` to speak it.
 - **`workspace:read`**: tells the worker which workspace is focused.
 
 Nothing leaves your machine.
