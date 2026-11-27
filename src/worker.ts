@@ -1,4 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Activate } from 'orca/worker'
 import { orcaCliPath, replyToSpeak, type RunOrca } from './reply.ts'
 
@@ -21,6 +24,8 @@ type Playback = { speech: Speech; isPaused: boolean }
 
 /** One sentence being spoken: `cancel` cuts it off, `ended` settles when it ends either way. */
 export type Utterance = { cancel(): void; ended: Promise<void> }
+/** Renders a sentence to an audio clip ahead of time, then plays a clip. */
+export type Voice = { render(sentence: string): Promise<string>; play(clip: string): Utterance }
 
 export function sentences(text: string): string[] {
   return text
@@ -39,51 +44,65 @@ export function paragraphs(text: string): string[][] {
 
 /**
  * `say` hands audio to a macOS speech service that keeps talking when `say` is frozen,
- * so pausing cancels the current sentence and resuming speaks it again from its start.
+ * so pausing cancels the current sentence and resuming plays it again from its start.
+ * The next sentence renders while this one plays, so sentences follow without a gap.
  */
-export function speakBySentence(text: string, utter: (sentence: string) => Utterance): Speech {
+export function speakBySentence(text: string, voice: Voice): Speech {
   const parts: string[] = []
   const paragraphStarts: number[] = []
   for (const paragraph of paragraphs(text)) {
     paragraphStarts.push(parts.length)
     parts.push(...paragraph)
   }
+  const clips = new Map<number, Promise<string>>()
+  const clip = (part: number) => {
+    if (!clips.has(part)) clips.set(part, voice.render(parts[part]))
+    return clips.get(part)!
+  }
   let index = 0
+  // Bumped by every cancel, so a sentence still rendering when cancelled never plays.
+  let turn = 0
+  let isPlaying = false
   let current: Utterance | null = null
   let finish = () => {}
   const done = new Promise<void>((resolve) => {
     finish = resolve
   })
 
-  const playNext = () => {
+  const playNext = async () => {
     if (index >= parts.length) return finish()
-    const utterance = utter(parts[index])
-    current = utterance
-    void utterance.ended.then(() => {
-      if (current !== utterance) return
-      index++
-      playNext()
-    })
+    const myTurn = turn
+    isPlaying = true
+    const rendering = clip(index)
+    if (index + 1 < parts.length) void clip(index + 1)
+    const file = await rendering
+    if (myTurn !== turn) return
+    current = voice.play(file)
+    await current.ended
+    if (myTurn !== turn) return
+    index++
+    void playNext()
   }
   const cancel = () => {
-    const utterance = current
+    turn++
+    isPlaying = false
+    current?.cancel()
     current = null
-    utterance?.cancel()
   }
 
   const jumpToParagraph = (paragraph: number) => {
     if (index >= parts.length) return
     cancel()
     index = paragraphStarts[paragraph] ?? parts.length
-    playNext()
+    void playNext()
   }
   const currentParagraph = () => paragraphStarts.filter((start) => start <= index).length - 1
 
-  playNext()
+  void playNext()
   return {
     pause: cancel,
     resume: () => {
-      if (!current) playNext()
+      if (!isPlaying) void playNext()
     },
     stop: () => {
       cancel()
@@ -159,12 +178,26 @@ export default createActivate({
         stdout ? resolve(stdout) : reject(error),
       ),
     ),
-  speak: (text) =>
-    speakBySentence(text, (sentence) => {
-      const child = spawn('/usr/bin/say', ['-r', WORDS_PER_MINUTE, sentence], { stdio: 'ignore' })
-      return {
-        cancel: () => child.kill(),
-        ended: new Promise((resolve) => child.on('close', () => resolve())),
-      }
-    }),
+  // `say` repeats its last word when it exits mid-playback, so it only renders clips and `afplay` plays them.
+  speak: (text) => {
+    const clipFolder = mkdtempSync(join(tmpdir(), 'speak-reply-'))
+    let clipCount = 0
+    const speech = speakBySentence(text, {
+      // A clip that fails to render makes `afplay` exit at once, so playback skips that sentence.
+      render: (sentence) =>
+        new Promise((resolve) => {
+          const clip = join(clipFolder, `${clipCount++}.aiff`)
+          execFile('/usr/bin/say', ['-r', WORDS_PER_MINUTE, '-o', clip, sentence], () => resolve(clip))
+        }),
+      play: (clip) => {
+        const child = spawn('/usr/bin/afplay', [clip], { stdio: 'ignore' })
+        return {
+          cancel: () => child.kill(),
+          ended: new Promise((resolve) => child.on('close', () => resolve())),
+        }
+      },
+    })
+    void speech.done.then(() => rmSync(clipFolder, { recursive: true, force: true }))
+    return speech
+  },
 })

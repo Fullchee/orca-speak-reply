@@ -1,6 +1,6 @@
 # Speak Reply for Orca
 
-An [Orca](https://orca.dev) plugin that reads the last agent reply in the focused workspace aloud. It works in chat tabs and terminal agents alike. macOS only: it speaks with the built-in `say` command.
+An [Orca](https://orca.dev) plugin that reads the last agent reply in the focused workspace aloud. It works in chat tabs and terminal agents alike. macOS only: it speaks with the built-in `say` and `afplay` commands.
 
 ## Use
 
@@ -21,7 +21,7 @@ Orca lists the access the plugin needs and prints the `--approve <fingerprint>` 
 
 ## Access
 
-- **Full access (`trusted-worker`)**: the worker runs the `orca` CLI to read the reply, and `say` to speak it.
+- **Full access (`trusted-worker`)**: the worker runs the `orca` CLI to read the reply, `say` to turn each sentence into audio, and `afplay` to play it.
 - **`workspace:read`**: tells the worker which workspace is focused.
 
 Nothing leaves your machine.
