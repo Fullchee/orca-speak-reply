@@ -3,7 +3,16 @@ import type { Activate } from 'orca/worker'
 import { orcaCliPath, replyToSpeak, type RunOrca } from './reply.ts'
 
 /** A running speech: `stop` cuts it off, `done` settles when it ends either way. */
-export type Speech = { pause(): void; resume(): void; stop(): void; done: Promise<void> }
+export type Speech = {
+  pause(): void
+  resume(): void
+  stop(): void
+  /** Jump to the next paragraph's start and play; past the last one, finish. */
+  next(): void
+  /** Jump to the previous paragraph's start and play; in the first one, restart it. */
+  previous(): void
+  done: Promise<void>
+}
 export type Deps = { runOrca: RunOrca; speak(text: string): Speech }
 
 const WORDS_PER_MINUTE = '210'
@@ -20,12 +29,25 @@ export function sentences(text: string): string[] {
     .filter((sentence) => /\w/.test(sentence))
 }
 
+/** Each paragraph's sentences; a blank line ends a paragraph. */
+export function paragraphs(text: string): string[][] {
+  return text
+    .split(/\n[ \t]*\n/)
+    .map(sentences)
+    .filter((paragraph) => paragraph.length > 0)
+}
+
 /**
  * `say` hands audio to a macOS speech service that keeps talking when `say` is frozen,
  * so pausing cancels the current sentence and resuming speaks it again from its start.
  */
 export function speakBySentence(text: string, utter: (sentence: string) => Utterance): Speech {
-  const parts = sentences(text)
+  const parts: string[] = []
+  const paragraphStarts: number[] = []
+  for (const paragraph of paragraphs(text)) {
+    paragraphStarts.push(parts.length)
+    parts.push(...paragraph)
+  }
   let index = 0
   let current: Utterance | null = null
   let finish = () => {}
@@ -49,6 +71,14 @@ export function speakBySentence(text: string, utter: (sentence: string) => Utter
     utterance?.cancel()
   }
 
+  const jumpToParagraph = (paragraph: number) => {
+    if (index >= parts.length) return
+    cancel()
+    index = paragraphStarts[paragraph] ?? parts.length
+    playNext()
+  }
+  const currentParagraph = () => paragraphStarts.filter((start) => start <= index).length - 1
+
   playNext()
   return {
     pause: cancel,
@@ -60,6 +90,8 @@ export function speakBySentence(text: string, utter: (sentence: string) => Utter
       index = parts.length
       finish()
     },
+    next: () => jumpToParagraph(currentParagraph() + 1),
+    previous: () => jumpToParagraph(Math.max(0, currentParagraph() - 1)),
     done,
   }
 }
@@ -75,7 +107,9 @@ export function createActivate({ runOrca, speak }: Deps): Activate {
           ? { text: 'Resume', icon: 'play' as const }
           : { text: 'Pause', icon: 'pause' as const }
       await orca.host.call('statusBar.update', { id: 'speak', ...mainButton })
-      await orca.host.call('statusBar.update', { id: 'stop', visible: playback !== null })
+      for (const id of ['previous', 'next', 'stop']) {
+        await orca.host.call('statusBar.update', { id, visible: playback !== null })
+      }
     }
 
     void show()
@@ -99,6 +133,15 @@ export function createActivate({ runOrca, speak }: Deps): Activate {
         return show()
       })
     })
+
+    const navigate = (move: 'next' | 'previous') => async () => {
+      if (!playback) return
+      playback.speech[move]()
+      playback.isPaused = false
+      await show()
+    }
+    orca.commands.register('speak-reply.next', navigate('next'))
+    orca.commands.register('speak-reply.previous', navigate('previous'))
 
     orca.commands.register('speak-reply.stop', () => {
       playback?.speech.stop()

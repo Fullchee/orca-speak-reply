@@ -1,6 +1,6 @@
 import { assert, mockHost, mountWorker, test } from 'orca/testing'
 import { NO_WORKSPACE } from '../src/reply.ts'
-import { createActivate, sentences, speakBySentence, type Speech, type Utterance } from '../src/worker.ts'
+import { createActivate, paragraphs, sentences, speakBySentence, type Speech, type Utterance } from '../src/worker.ts'
 
 function fakeSpeaker() {
   const spoken: string[] = []
@@ -15,6 +15,8 @@ function fakeSpeaker() {
       pause: () => calls.push('pause'),
       resume: () => calls.push('resume'),
       stop: () => (calls.push('stop'), finish()),
+      next: () => calls.push('next'),
+      previous: () => calls.push('previous'),
       done,
     }
   }
@@ -43,7 +45,8 @@ type StatusUpdate = { id: string; text?: string; visible?: boolean }
 
 const updates = (worker: Worker) => worker.host.callsOf('statusBar.update') as StatusUpdate[]
 const mainLabels = (worker: Worker) => updates(worker).flatMap((u) => (u.id === 'speak' ? [u.text] : []))
-const isStopShown = (worker: Worker) => updates(worker).filter((u) => u.id === 'stop').at(-1)?.visible
+const isShown = (worker: Worker, id: string) => updates(worker).filter((u) => u.id === id).at(-1)?.visible
+const isStopShown = (worker: Worker) => isShown(worker, 'stop')
 
 const focused = { workspaceId: 'identity:w', branch: 'b', displayName: 'b', terminals: [] }
 
@@ -90,6 +93,32 @@ test('Stop ends a paused speech so the next press reads from the start', async (
   assert.equal(speaker.spoken.length, 2)
 })
 
+test('shows Back and Next only while a reply plays', async () => {
+  const { worker, speaker } = await mount(focused)
+  await worker.command('speak-reply.toggle')
+  assert.deepEqual([isShown(worker, 'previous'), isShown(worker, 'next')], [true, true])
+  speaker.finish()
+  await tick()
+  assert.deepEqual([isShown(worker, 'previous'), isShown(worker, 'next')], [false, false])
+})
+
+test('Next and Back jump paragraphs and leave the reply playing', async () => {
+  const { worker, speaker } = await mount(focused)
+  await worker.command('speak-reply.toggle')
+  await worker.command('speak-reply.toggle')
+  await worker.command('speak-reply.next')
+  await worker.command('speak-reply.previous')
+  assert.deepEqual(speaker.calls, ['pause', 'next', 'previous'])
+  assert.equal(mainLabels(worker).at(-1), 'Pause')
+})
+
+test('Next and Back do nothing when nothing is playing', async () => {
+  const { worker, speaker } = await mount(focused)
+  await worker.command('speak-reply.next')
+  await worker.command('speak-reply.previous')
+  assert.deepEqual(speaker.calls, [])
+})
+
 test('Stop does nothing when nothing is playing', async () => {
   const { worker, speaker } = await mount(focused)
   await worker.command('speak-reply.stop')
@@ -118,6 +147,68 @@ function fakeUtterances() {
 
 test('splits text into sentences and lines, skipping blank ones', () => {
   assert.deepEqual(sentences('One. Two? Three!\n- four\n\n  \nFive'), ['One.', 'Two?', 'Three!', '- four', 'Five'])
+})
+
+test('groups sentences into paragraphs split by blank lines', () => {
+  assert.deepEqual(paragraphs('One. Two.\n- three\n \n\nFour.\n\n  '), [['One.', 'Two.', '- three'], ['Four.']])
+})
+
+const threeParagraphs = 'One. Two.\n\nThree. Four.\n\nFive.'
+
+test('next jumps to the start of the next paragraph', () => {
+  const fake = fakeUtterances()
+  const speech = speakBySentence(threeParagraphs, fake.utter)
+  speech.next()
+  speech.next()
+  assert.deepEqual(fake.said, ['One.', 'Three.', 'Five.'])
+})
+
+test('next in the last paragraph finishes the speech', async () => {
+  const fake = fakeUtterances()
+  const speech = speakBySentence('One.\n\nTwo.', fake.utter)
+  let isDone = false
+  void speech.done.then(() => (isDone = true))
+  speech.next()
+  speech.next()
+  await tick()
+  assert.equal(isDone, true)
+  assert.deepEqual(fake.said, ['One.', 'Two.'])
+})
+
+test('previous jumps to the start of the previous paragraph', async () => {
+  const fake = fakeUtterances()
+  const speech = speakBySentence(threeParagraphs, fake.utter)
+  speech.next()
+  fake.end()
+  await tick()
+  speech.previous()
+  assert.deepEqual(fake.said, ['One.', 'Three.', 'Four.', 'One.'])
+})
+
+test('previous in the first paragraph restarts it', async () => {
+  const fake = fakeUtterances()
+  const speech = speakBySentence(threeParagraphs, fake.utter)
+  fake.end()
+  await tick()
+  speech.previous()
+  assert.deepEqual(fake.said, ['One.', 'Two.', 'One.'])
+})
+
+test('navigating a paused speech plays from the new paragraph', () => {
+  const fake = fakeUtterances()
+  const speech = speakBySentence(threeParagraphs, fake.utter)
+  speech.pause()
+  speech.next()
+  assert.deepEqual(fake.said, ['One.', 'Three.'])
+})
+
+test('navigating a stopped speech says nothing', () => {
+  const fake = fakeUtterances()
+  const speech = speakBySentence(threeParagraphs, fake.utter)
+  speech.stop()
+  speech.next()
+  speech.previous()
+  assert.deepEqual(fake.said, ['One.'])
 })
 
 test('speaks each sentence in turn, then finishes', async () => {
