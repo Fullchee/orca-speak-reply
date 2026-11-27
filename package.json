@@ -5,7 +5,8 @@
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "orca plugin test .",
-    "validate": "orca plugin validate ."
+    "validate": "orca plugin validate .",
+    "plugin:install": "orca plugin install Fullchee/orca-speak-reply"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

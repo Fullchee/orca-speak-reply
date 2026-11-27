@@ -17,6 +17,8 @@ It reads the newest reply of the agent that answered most recently in the focuse
 orca plugin install Fullchee/orca-speak-reply
 ```
 
+From a clone, `bun run plugin:install` runs the same command. Run it again to update to the newest release.
+
 Orca lists the access the plugin needs and prints the `--approve <fingerprint>` command to run next.
 
 ## Access
