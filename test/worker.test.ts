@@ -125,6 +125,24 @@ test('Stop does nothing when nothing is playing', async () => {
   assert.deepEqual(speaker.calls, [])
 })
 
+test('the panel lists the focused workspace replies', async () => {
+  const { worker } = await mount(focused)
+  const list = await worker.request('replies.list')
+  assert.deepEqual(list, { replies: [{ title: 'Done.', age: 'Latest reply', speech: 'Done.' }], emptyReason: null })
+})
+
+test('the panel plays a reply, replacing the one already playing', async () => {
+  const { worker, speaker } = await mount(focused)
+  await worker.command('speak-reply.toggle')
+  await worker.request('replies.play', { speech: 'Older reply.' })
+  // Stopping settles the first speech, which must not reset the controls the second one shows.
+  await tick()
+  assert.deepEqual(speaker.spoken, ['Done.', 'Older reply.'])
+  assert.deepEqual(speaker.calls, ['stop'])
+  assert.equal(mainLabels(worker).at(-1), 'Pause')
+  assert.equal(isStopShown(worker), true)
+})
+
 test('says no workspace is focused when Orca has none', async () => {
   const { worker, speaker } = await mount(null)
   await worker.command('speak-reply.toggle')

@@ -1,5 +1,5 @@
 import { assert, test } from 'orca/testing'
-import { NO_REPLY, NO_WORKSPACE, orcaCliPath, replyToSpeak, toSpeech, type RunOrca } from '../src/reply.ts'
+import { listReplies, NO_REPLY, NO_WORKSPACE, orcaCliPath, replyToSpeak, toSpeech, type RunOrca } from '../src/reply.ts'
 
 const WORKSPACE = 'identity:wt2:local:abc'
 
@@ -88,4 +88,38 @@ test('finds the CLI in the app bundle running the worker', () => {
 
 test('falls back to orca on PATH outside an app bundle', () => {
   assert.equal(orcaCliPath('/usr/local/bin/node'), 'orca')
+})
+
+test('lists replies newest first with their opening words and age', async () => {
+  const long = `${'word '.repeat(30)}end`
+  const orca = fakeOrca({
+    'agent list': agents([{ orcaSessionId: 'a', lastAssistantMessage: 'x', updatedAt: 1 }]),
+    'agent read': entries([
+      { kind: 'message', role: 'assistant', text: long },
+      { kind: 'message', role: 'assistant', text: '' },
+      { kind: 'message', role: 'assistant', text: '# Plan\n\nStep one.' },
+      { kind: 'message', role: 'user', text: 'Go' },
+      { kind: 'message', role: 'assistant', text: 'Done.' },
+    ]),
+  })
+  const { replies, emptyReason } = await listReplies(WORKSPACE, orca)
+  assert.equal(emptyReason, null)
+  assert.deepEqual(
+    replies.map(({ title, age }) => [title, age]),
+    [
+      ['Done.', 'Latest reply'],
+      ['Plan', '1 reply ago'],
+      [`${'word '.repeat(15)}word…`, '2 replies ago'],
+    ],
+  )
+  assert.equal(replies[1].speech, '  Plan\n\nStep one.')
+})
+
+test('lists nothing, with the reason, when no workspace is focused', async () => {
+  assert.deepEqual(await listReplies(undefined, fakeOrca({})), { replies: [], emptyReason: NO_WORKSPACE })
+})
+
+test('lists nothing, with the reason, when no agent has answered', async () => {
+  const orca = fakeOrca({ 'agent list': agents([]) })
+  assert.deepEqual(await listReplies(WORKSPACE, orca), { replies: [], emptyReason: NO_REPLY })
 })

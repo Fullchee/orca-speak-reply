@@ -8,6 +8,7 @@ An [Orca](https://orca.dev) plugin that reads the last agent reply in the focuse
 - **Pause / Resume**: click the same button, or press ⌘⇧R again. Resume replays the sentence it paused in, then carries on.
 - **Next / Back**: click **Next** or **Back**, or press ⌘⇧. and ⌘⇧,. Next skips to the next paragraph; Back returns to the previous one, or restarts the first. Both play, even from a pause.
 - **Stop**: click **Stop**, shown while a reply plays or is paused. The next read starts from the top.
+- **Earlier replies**: open the **Replies** panel in the right sidebar. It lists the newest agent's recent replies, newest first, and refreshes when an agent finishes. Click one to read it; the status bar buttons then control it.
 
 It reads the newest reply of the agent that answered most recently in the focused workspace. Markdown is reduced to plain sentences: code blocks become "code block" and URLs become "link".
 
@@ -30,7 +31,8 @@ You need macOS and Orca with plugins turned on (Settings → Plugins). No clone 
 ## Access
 
 - **Full access (`trusted-worker`)**: the worker runs the `orca` CLI to read the reply, `say` to turn each sentence into audio, and `afplay` to play it.
-- **`workspace:read`**: tells the worker which workspace is focused.
+- **`workspace:read`**: tells the worker which workspace is focused, and the panel when you switch.
+- **`agent:read`**: tells the panel when an agent finishes, so it can show the new reply.
 
 Nothing leaves your machine.
 

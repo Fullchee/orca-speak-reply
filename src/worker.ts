@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Activate } from 'orca/worker'
-import { orcaCliPath, replyToSpeak, type RunOrca } from './reply.ts'
+import { listReplies, orcaCliPath, replyToSpeak, type RunOrca } from './reply.ts'
+import './requests.ts'
 
 /** A running speech: `stop` cuts it off, `done` settles when it ends either way. */
 export type Speech = {
@@ -133,6 +134,21 @@ export function createActivate({ runOrca, speak }: Deps): Activate {
 
     void show()
 
+    // The worker runs from `/`, so the CLI's `--worktree active` can't find the workspace.
+    const focusedWorkspaceId = async () => (await orca.host.call('workspace.readContext', {}))?.workspaceId
+
+    const play = async (text: string) => {
+      const current: Playback = { speech: speak(text), isPaused: false }
+      playback = current
+      await show()
+      void current.speech.done.then(() => {
+        // A reply started from the panel replaces this one, which then ends.
+        if (playback !== current) return
+        playback = null
+        return show()
+      })
+    }
+
     orca.commands.register('speak-reply.toggle', async () => {
       if (playback) {
         if (playback.isPaused) playback.speech.resume()
@@ -141,16 +157,14 @@ export function createActivate({ runOrca, speak }: Deps): Activate {
         await show()
         return
       }
-      // The worker runs from `/`, so the CLI's `--worktree active` can't find the workspace.
-      const context = await orca.host.call('workspace.readContext', {})
-      const text = await replyToSpeak(context?.workspaceId, runOrca)
-      const current: Playback = { speech: speak(text), isPaused: false }
-      playback = current
-      await show()
-      void current.speech.done.then(() => {
-        playback = null
-        return show()
-      })
+      await play(await replyToSpeak(await focusedWorkspaceId(), runOrca))
+    })
+
+    orca.panels.handle('replies.list', async () => listReplies(await focusedWorkspaceId(), runOrca))
+    orca.panels.handle('replies.play', async ({ speech }) => {
+      playback?.speech.stop()
+      await play(speech)
+      return null
     })
 
     const navigate = (move: 'next' | 'previous') => async () => {
